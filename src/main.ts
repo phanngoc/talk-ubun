@@ -230,6 +230,74 @@ draftBtn.addEventListener("click", async () => {
   }
 });
 
+// ---------- assistant reply (Claude + Soniox TTS) ----------
+const replyBtn = $<HTMLButtonElement>("#reply-btn");
+let audioCtx: AudioContext | null = null;
+
+function addReplyBlock(text: string) {
+  hintEl.style.display = "none";
+  const div = document.createElement("div");
+  div.className = "reply-block";
+  div.textContent = "🤖 " + text;
+  segmentsEl.appendChild(div);
+  keepBottom();
+}
+
+async function speakAudio(b64: string): Promise<void> {
+  audioCtx ??= new AudioContext();
+  if (audioCtx.state === "suspended") await audioCtx.resume();
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const buf = await audioCtx.decodeAudioData(bytes.buffer);
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  src.connect(analyser);
+  analyser.connect(audioCtx.destination);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+
+  avatar.setState("speaking");
+  let raf = 0;
+  const tick = () => {
+    analyser.getByteFrequencyData(data);
+    let s = 0;
+    for (let i = 0; i < data.length; i++) s += data[i];
+    avatar.setLevel(Math.min(1, s / data.length / 80)); // drive the VRM mouth
+    raf = requestAnimationFrame(tick);
+  };
+  return new Promise((resolve) => {
+    src.onended = () => {
+      cancelAnimationFrame(raf);
+      avatar.setLevel(0);
+      avatar.setState(document.body.dataset.state === "listening" ? "listening" : "idle");
+      resolve();
+    };
+    src.start();
+    tick();
+  });
+}
+
+replyBtn.addEventListener("click", async () => {
+  replyBtn.disabled = true;
+  const prev = stateLabel.textContent;
+  stateLabel.textContent = "Trợ lý đang nghĩ…";
+  avatar.setState("thinking");
+  try {
+    const r = await invoke<{ text: string; audio_b64: string }>("speak_reply");
+    addReplyBlock(r.text);
+    stateLabel.textContent = prev || "Sẵn sàng";
+    await speakAudio(r.audio_b64);
+  } catch (err) {
+    stateLabel.textContent = "Trợ lý lỗi: " + err;
+    avatar.setState(document.body.dataset.state === "listening" ? "listening" : "idle");
+  } finally {
+    replyBtn.disabled = false;
+  }
+});
+
 // ---------- boot ----------
 (async () => {
   const s = await invoke<Session>("current_session");

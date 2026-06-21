@@ -9,6 +9,8 @@ pub struct Config {
     pub langs: Vec<String>,
     pub hotkey_str: String,
     pub anthropic_key: Option<String>,
+    pub tts_voice: String,
+    pub tts_lang: String,
 }
 
 impl Config {
@@ -38,11 +40,16 @@ impl Config {
             .ok()
             .filter(|s| !s.trim().is_empty());
 
+        let tts_voice = std::env::var("TALK_TTS_VOICE").unwrap_or_else(|_| "Maya".to_string());
+        let tts_lang = std::env::var("TALK_TTS_LANG").unwrap_or_else(|_| "vi".to_string());
+
         Ok(Self {
             api_key,
             langs,
             hotkey_str,
             anthropic_key,
+            tts_voice,
+            tts_lang,
         })
     }
 }

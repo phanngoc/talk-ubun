@@ -4,6 +4,7 @@
 //! frontend. A global hotkey or the tray menu toggles recording; while
 //! recording, transcript events are emitted to the webview.
 
+mod assistant;
 mod audio;
 mod config;
 mod draft;
@@ -125,6 +126,47 @@ async fn generate_draft_board(app: AppHandle) -> Result<draft::DraftBoard, Strin
     draft::generate(&key, &transcript)
         .await
         .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------- assistant reply (TTS)
+
+#[tauri::command]
+async fn speak_reply(app: AppHandle) -> Result<assistant::Reply, String> {
+    let transcript = {
+        let store = app.state::<session::SessionStore>();
+        store
+            .current()
+            .segments
+            .iter()
+            .map(|s| s.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    if transcript.trim().is_empty() {
+        return Err("Phiên chưa có nội dung để trả lời.".to_string());
+    }
+    let (soniox_key, voice, lang, anthropic_key) = {
+        let st = app.state::<AppState>();
+        (
+            st.cfg.api_key.clone(),
+            st.cfg.tts_voice.clone(),
+            st.cfg.tts_lang.clone(),
+            st.cfg.anthropic_key.clone(),
+        )
+    };
+    let anthropic_key =
+        anthropic_key.ok_or_else(|| "ANTHROPIC_API_KEY chưa cấu hình trong .env".to_string())?;
+
+    let text = assistant::reply(&anthropic_key, &transcript)
+        .await
+        .map_err(|e| e.to_string())?;
+    let audio = assistant::tts(&soniox_key, &text, &voice, &lang)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(assistant::Reply {
+        text,
+        audio_b64: assistant::encode_audio(&audio),
+    })
 }
 
 // ---------------------------------------------------------------- toggle / record
@@ -286,7 +328,8 @@ pub fn run() {
             switch_session,
             update_segment,
             set_session_title,
-            generate_draft_board
+            generate_draft_board,
+            speak_reply
         ])
         .setup(move |app| {
             // Global hotkey (registering from Rust needs no capability entry).
