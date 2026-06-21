@@ -112,13 +112,13 @@ async fn extend_draft_board(
     if new_text.trim().is_empty() {
         return Err("Chưa có nội dung mới để thêm vào board.".to_string());
     }
-    let key = {
+    let (key, model) = {
         let st = app.state::<AppState>();
-        st.cfg.anthropic_key.clone()
-    }
-    .ok_or_else(|| "ANTHROPIC_API_KEY chưa cấu hình trong .env".to_string())?;
+        (st.cfg.anthropic_key.clone(), st.cfg.claude_model.clone())
+    };
+    let key = key.ok_or_else(|| "ANTHROPIC_API_KEY chưa cấu hình trong .env".to_string())?;
 
-    draft::extend(&key, &board_json, &new_text)
+    draft::extend(&key, &model, &board_json, &new_text)
         .await
         .map_err(|e| e.to_string())
 }
@@ -151,19 +151,20 @@ async fn speak_reply(app: AppHandle) -> Result<assistant::Reply, String> {
     {
         conversation.remove(0);
     }
-    let (soniox_key, voice, lang, anthropic_key) = {
+    let (soniox_key, voice, lang, anthropic_key, claude_model) = {
         let st = app.state::<AppState>();
         (
             st.cfg.api_key.clone(),
             st.cfg.tts_voice.clone(),
             st.cfg.tts_lang.clone(),
             st.cfg.anthropic_key.clone(),
+            st.cfg.claude_model.clone(),
         )
     };
     let anthropic_key =
         anthropic_key.ok_or_else(|| "ANTHROPIC_API_KEY chưa cấu hình trong .env".to_string())?;
 
-    let text = assistant::reply(&anthropic_key, &conversation)
+    let text = assistant::reply(&anthropic_key, &claude_model, &conversation)
         .await
         .map_err(|e| e.to_string())?;
     let audio = assistant::tts(&soniox_key, &text, &voice, &lang)

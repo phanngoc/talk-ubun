@@ -9,6 +9,7 @@ pub struct Config {
     pub langs: Vec<String>,
     pub hotkey_str: String,
     pub anthropic_key: Option<String>,
+    pub claude_model: String,
     pub tts_voice: String,
     pub tts_lang: String,
 }
@@ -40,6 +41,9 @@ impl Config {
             .ok()
             .filter(|s| !s.trim().is_empty());
 
+        // Sonnet by default for speed; set TALK_CLAUDE_MODEL=claude-opus-4-8 for max quality.
+        let claude_model =
+            std::env::var("TALK_CLAUDE_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
         let tts_voice = std::env::var("TALK_TTS_VOICE").unwrap_or_else(|_| "Maya".to_string());
         let tts_lang = std::env::var("TALK_TTS_LANG").unwrap_or_else(|_| "vi".to_string());
 
@@ -48,6 +52,7 @@ impl Config {
             langs,
             hotkey_str,
             anthropic_key,
+            claude_model,
             tts_voice,
             tts_lang,
         })

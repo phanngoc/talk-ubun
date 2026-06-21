@@ -12,7 +12,6 @@ use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const CLAUDE_URL: &str = "https://api.anthropic.com/v1/messages";
-const CLAUDE_MODEL: &str = "claude-opus-4-8";
 const TTS_URL: &str = "wss://tts-rt.soniox.com/tts-websocket";
 const TTS_MODEL: &str = "tts-rt-v1";
 
@@ -33,7 +32,11 @@ hay emoji — chỉ văn xuôi tự nhiên.";
 
 /// `conversation` is the full dialogue as (role, text) pairs, role ∈ {user, assistant},
 /// so Claude has the context of what it already said and doesn't repeat itself.
-pub async fn reply(api_key: &str, conversation: &[(String, String)]) -> Result<String> {
+pub async fn reply(
+    api_key: &str,
+    model: &str,
+    conversation: &[(String, String)],
+) -> Result<String> {
     let messages: Vec<Value> = conversation
         .iter()
         .map(|(role, text)| {
@@ -43,7 +46,7 @@ pub async fn reply(api_key: &str, conversation: &[(String, String)]) -> Result<S
         .collect();
 
     let body = json!({
-        "model": CLAUDE_MODEL,
+        "model": model,
         "max_tokens": 512,
         "thinking": { "type": "disabled" }, // short conversational reply — no deep reasoning
         "output_config": { "effort": "low" },

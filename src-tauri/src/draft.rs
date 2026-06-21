@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
-const MODEL: &str = "claude-opus-4-8";
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Plot {
@@ -66,12 +65,17 @@ fn schema() -> Value {
     })
 }
 
-pub async fn extend(api_key: &str, current_board_json: &str, new_text: &str) -> Result<DraftBoard> {
+pub async fn extend(
+    api_key: &str,
+    model: &str,
+    current_board_json: &str,
+    new_text: &str,
+) -> Result<DraftBoard> {
     let user = format!(
         "BOARD HIỆN TẠI (JSON):\n{current_board_json}\n\nNGƯỜI DÙNG VỪA NÓI:\n{new_text}"
     );
     let body = json!({
-        "model": MODEL,
+        "model": model,
         "max_tokens": 1024,
         "thinking": { "type": "disabled" },
         "output_config": { "effort": "low", "format": { "type": "json_schema", "schema": schema() } },
