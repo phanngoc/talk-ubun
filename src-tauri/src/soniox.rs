@@ -124,7 +124,7 @@ pub async fn run_session_events(
     // it as an editable segment.
     if !text.is_empty() {
         let store = app.state::<crate::session::SessionStore>();
-        if let Some(seg) = store.append_segment(&text) {
+        if let Some(seg) = store.append_segment(&text, "user") {
             let _ = app.emit("session:segment", &seg);
         }
     }

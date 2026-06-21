@@ -102,20 +102,15 @@ fn set_session_title(
 // ---------------------------------------------------------------- draft board
 
 #[tauri::command]
-async fn generate_draft_board(app: AppHandle) -> Result<draft::DraftBoard, String> {
-    // Read transcript + key without holding any State guard across the await.
-    let transcript = {
-        let store = app.state::<session::SessionStore>();
-        store
-            .current()
-            .segments
-            .iter()
-            .map(|s| s.text.clone())
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    if transcript.trim().is_empty() {
-        return Err("Phiên chưa có nội dung để vẽ.".to_string());
+/// Incremental: extend the current board (compact JSON from the frontend) with
+/// only the newly-spoken text; returns the delta (new nodes/edges) to merge.
+async fn extend_draft_board(
+    app: AppHandle,
+    board_json: String,
+    new_text: String,
+) -> Result<draft::DraftBoard, String> {
+    if new_text.trim().is_empty() {
+        return Err("Chưa có nội dung mới để thêm vào board.".to_string());
     }
     let key = {
         let st = app.state::<AppState>();
@@ -123,7 +118,7 @@ async fn generate_draft_board(app: AppHandle) -> Result<draft::DraftBoard, Strin
     }
     .ok_or_else(|| "ANTHROPIC_API_KEY chưa cấu hình trong .env".to_string())?;
 
-    draft::generate(&key, &transcript)
+    draft::extend(&key, &board_json, &new_text)
         .await
         .map_err(|e| e.to_string())
 }
@@ -132,18 +127,29 @@ async fn generate_draft_board(app: AppHandle) -> Result<draft::DraftBoard, Strin
 
 #[tauri::command]
 async fn speak_reply(app: AppHandle) -> Result<assistant::Reply, String> {
-    let transcript = {
+    // Full dialogue (user + assistant turns) so Claude has the conversation context.
+    let mut conversation: Vec<(String, String)> = {
         let store = app.state::<session::SessionStore>();
         store
             .current()
             .segments
             .iter()
-            .map(|s| s.text.clone())
-            .collect::<Vec<_>>()
-            .join("\n")
+            .map(|s| (s.role.clone(), s.text.clone()))
+            .collect()
     };
-    if transcript.trim().is_empty() {
+    if conversation.is_empty() {
         return Err("Phiên chưa có nội dung để trả lời.".to_string());
+    }
+    // Keep only the last ~16 turns (latency/token economy); must start with a user turn.
+    if conversation.len() > 16 {
+        conversation = conversation.split_off(conversation.len() - 16);
+    }
+    while conversation
+        .first()
+        .map(|(r, _)| r == "assistant")
+        .unwrap_or(false)
+    {
+        conversation.remove(0);
     }
     let (soniox_key, voice, lang, anthropic_key) = {
         let st = app.state::<AppState>();
@@ -157,12 +163,17 @@ async fn speak_reply(app: AppHandle) -> Result<assistant::Reply, String> {
     let anthropic_key =
         anthropic_key.ok_or_else(|| "ANTHROPIC_API_KEY chưa cấu hình trong .env".to_string())?;
 
-    let text = assistant::reply(&anthropic_key, &transcript)
+    let text = assistant::reply(&anthropic_key, &conversation)
         .await
         .map_err(|e| e.to_string())?;
     let audio = assistant::tts(&soniox_key, &text, &voice, &lang)
         .await
         .map_err(|e| e.to_string())?;
+
+    // Persist the assistant turn so the next reply keeps full context.
+    app.state::<session::SessionStore>()
+        .append_segment(&text, "assistant");
+
     Ok(assistant::Reply {
         text,
         audio_b64: assistant::encode_audio(&audio),
@@ -328,7 +339,7 @@ pub fn run() {
             switch_session,
             update_segment,
             set_session_title,
-            generate_draft_board,
+            extend_draft_board,
             speak_reply
         ])
         .setup(move |app| {

@@ -1,11 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Avatar } from "./avatar";
-import { renderBoard, resizeBoard, type DraftBoard } from "./graph";
+import {
+  applyDelta,
+  boardSnapshot,
+  getSummary,
+  resetBoard,
+  nodeCount,
+  resizeBoard,
+  type DraftBoard,
+} from "./graph";
 
 interface Segment {
   id: string;
   text: string;
+  role: string; // "user" | "assistant"
   edited: boolean;
 }
 interface Session {
@@ -75,6 +84,16 @@ function scheduleSave(segId: string, text: string) {
 // ---------- rendering ----------
 function renderSegment(seg: Segment) {
   hintEl.style.display = "none";
+
+  // Assistant turns are read-only reply blocks.
+  if (seg.role === "assistant") {
+    const div = document.createElement("div");
+    div.className = "reply-block";
+    div.textContent = "🤖 " + seg.text;
+    segmentsEl.appendChild(div);
+    return;
+  }
+
   const wrap = document.createElement("div");
   wrap.className = "segment";
 
@@ -133,6 +152,9 @@ async function selectSession(id: string) {
   const s = await invoke<Session>("switch_session", { id });
   renderSession(s);
   refreshList();
+  resetBoard();
+  pendingBoardText = "";
+  closeBoard();
 }
 
 // ---------- events from backend ----------
@@ -152,7 +174,8 @@ listen<Segment>("session:segment", (e) => {
   renderSegment(e.payload);
   keepBottom();
   refreshList();
-  autoRespond(); // reply by voice + refresh the board (if open), no button needed
+  pendingBoardText += e.payload.text + "\n"; // accumulate for incremental board
+  autoRespond(); // reply by voice + extend the board (if open), no button needed
 });
 
 listen<string>("state:changed", (e) => {
@@ -184,6 +207,9 @@ newBtn.addEventListener("click", async () => {
   const meta = await invoke<SessionMeta>("new_session");
   renderSession({ id: meta.id, title: meta.title, created_at: meta.created_at, segments: [] });
   refreshList();
+  resetBoard();
+  pendingBoardText = "";
+  closeBoard();
 });
 
 titleEl.addEventListener("blur", () => {
@@ -197,24 +223,32 @@ titleEl.addEventListener("keydown", (e) => {
   }
 });
 
-// ---------- draft board (side panel, auto-updates) ----------
+// ---------- draft board (side panel, incremental delta) ----------
 const draftBtn = $<HTMLButtonElement>("#draft-btn");
 const boardPanel = $<HTMLElement>("#board-panel");
-const boardSummary = $<HTMLSpanElement>("#board-summary");
+const boardSummaryEl = $<HTMLSpanElement>("#board-summary");
 const boardGraph = $<HTMLDivElement>("#board-graph");
 let boardOpen = false;
 let boardBusy = false;
 let boardTimer = 0;
+let pendingBoardText = ""; // user text not yet merged into the board
 
 async function updateBoard() {
   if (boardBusy || !boardOpen) return;
+  const newText = pendingBoardText.trim();
+  if (!newText) return; // nothing new to add
   boardBusy = true;
+  pendingBoardText = "";
   try {
-    const board = await invoke<DraftBoard>("generate_draft_board");
-    boardSummary.textContent = board.summary || "";
-    renderBoard(boardGraph, board);
+    // Send the compact current board + only the new text; get back the delta.
+    const delta = await invoke<DraftBoard>("extend_draft_board", {
+      boardJson: JSON.stringify(boardSnapshot()),
+      newText,
+    });
+    applyDelta(boardGraph, delta);
+    boardSummaryEl.textContent = getSummary();
   } catch (err) {
-    boardSummary.textContent = "Board: " + err;
+    boardSummaryEl.textContent = "Board: " + err;
   } finally {
     boardBusy = false;
   }
@@ -224,13 +258,20 @@ function scheduleBoard() {
   clearTimeout(boardTimer);
   boardTimer = window.setTimeout(updateBoard, 1200);
 }
-function openBoard() {
+async function openBoard() {
   boardPanel.hidden = false;
   boardOpen = true;
-  requestAnimationFrame(() => {
-    resizeBoard(boardGraph);
+  requestAnimationFrame(() => resizeBoard(boardGraph));
+  if (nodeCount() === 0) {
+    // First open: seed the board from the existing conversation (user turns).
+    const s = await invoke<Session>("current_session");
+    const seed = s.segments
+      .filter((x) => x.role !== "assistant")
+      .map((x) => x.text)
+      .join("\n");
+    pendingBoardText = (seed + "\n" + pendingBoardText).trim();
     updateBoard();
-  });
+  }
 }
 function closeBoard() {
   boardPanel.hidden = true;

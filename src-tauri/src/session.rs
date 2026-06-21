@@ -7,10 +7,16 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+fn default_role() -> String {
+    "user".to_string()
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Segment {
     pub id: String,
     pub text: String,
+    #[serde(default = "default_role")]
+    pub role: String, // "user" | "assistant"
     #[serde(default)]
     pub edited: bool,
 }
@@ -125,7 +131,7 @@ impl SessionStore {
 
     /// Append a finalized transcript chunk to the current session. Returns the
     /// stored segment (so the frontend can render it editable).
-    pub fn append_segment(&self, text: &str) -> Option<Segment> {
+    pub fn append_segment(&self, text: &str, role: &str) -> Option<Segment> {
         let text = text.trim();
         if text.is_empty() {
             return None;
@@ -134,6 +140,7 @@ impl SessionStore {
         let seg = Segment {
             id: format!("s{}", s.segments.len()),
             text: text.to_string(),
+            role: role.to_string(),
             edited: false,
         };
         s.segments.push(seg.clone());
