@@ -31,13 +31,6 @@ impl Method {
             _ => Method::Paste,
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Method::Paste => "clipboard + Ctrl+V",
-            Method::Type => "direct typing",
-        }
-    }
 }
 
 fn delay_ms(var: &str, default: u64) -> Duration {

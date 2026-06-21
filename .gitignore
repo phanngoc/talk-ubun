@@ -1,2 +1,11 @@
+# Rust / Tauri
 /target
+src-tauri/target
+src-tauri/gen/schemas
+
+# Node / Vite
+node_modules
+dist
+
+# Secrets
 .env

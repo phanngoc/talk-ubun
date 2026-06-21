@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <title>talk-ubun</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body data-state="idle">
+    <div class="app">
+      <aside class="sidebar">
+        <button id="new-session" class="new-btn">+ Phiên mới</button>
+        <ul id="session-list" class="session-list"></ul>
+      </aside>
+
+      <section class="main">
+        <header class="bar">
+          <div class="brand"><span class="logo"></span>talk-ubun</div>
+          <div class="status">
+            <span class="dot" id="dot"></span>
+            <span id="state-label">Sẵn sàng</span>
+          </div>
+          <button id="draft-btn" class="draft-btn">◳ Draft board</button>
+          <button id="rec" class="rec">● Ghi (F7)</button>
+        </header>
+
+        <main id="transcript" class="transcript">
+          <h2 id="session-title" class="session-title" contenteditable="true" spellcheck="false"></h2>
+          <div id="segments" class="segments"></div>
+          <div id="live" class="live"></div>
+          <p id="hint" class="hint">
+            Nhấn <kbd>F7</kbd> (hoặc nút Ghi) rồi nói. Câu nói được lưu vào phiên
+            này và có thể sửa. Bấm <b>+ Phiên mới</b> để bắt đầu phiên khác.
+          </p>
+        </main>
+      </section>
+
+      <div class="avatar" id="avatar" title="Trợ lý — bấm để ghi (F7)">
+        <canvas id="avatar-canvas"></canvas>
+      </div>
+
+      <div class="board-modal" id="board-modal" hidden>
+        <div class="board-head">
+          <span class="board-tag">DRAFT BOARD</span>
+          <span id="board-summary" class="board-summary"></span>
+          <button id="board-close" class="board-close" title="Đóng">✕</button>
+        </div>
+        <div id="board-graph" class="board-graph"></div>
+      </div>
+    </div>
+  </body>
+</html>
