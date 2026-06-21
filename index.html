@@ -9,13 +9,14 @@
   </head>
   <body data-state="idle">
     <div class="app">
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar" hidden>
         <button id="new-session" class="new-btn">+ Phiên mới</button>
         <ul id="session-list" class="session-list"></ul>
       </aside>
 
       <section class="main">
         <header class="bar">
+          <button id="sidebar-toggle" class="icon-btn" title="Phiên làm việc">☰</button>
           <div class="brand"><span class="logo"></span>talk-ubun</div>
           <div class="status">
             <span class="dot" id="dot"></span>
@@ -26,28 +27,31 @@
           <button id="rec" class="rec">● Ghi (F7)</button>
         </header>
 
-        <main id="transcript" class="transcript">
-          <h2 id="session-title" class="session-title" contenteditable="true" spellcheck="false"></h2>
-          <div id="segments" class="segments"></div>
-          <div id="live" class="live"></div>
-          <p id="hint" class="hint">
-            Nhấn <kbd>F7</kbd> (hoặc nút Ghi) rồi nói. Câu nói được lưu vào phiên
-            này và có thể sửa. Bấm <b>+ Phiên mới</b> để bắt đầu phiên khác.
-          </p>
-        </main>
+        <div class="work">
+          <main id="transcript" class="transcript">
+            <h2 id="session-title" class="session-title" contenteditable="true" spellcheck="false"></h2>
+            <div id="segments" class="segments"></div>
+            <div id="live" class="live"></div>
+            <p id="hint" class="hint">
+              Nhấn <kbd>F7</kbd> (hoặc bấm avatar) rồi nói. Khi bạn dừng, trợ lý tự
+              trả lời bằng giọng nói. Bật <b>Draft board</b> để xem sơ đồ ý tưởng
+              cập nhật song song bên phải.
+            </p>
+          </main>
+
+          <section class="board-panel" id="board-panel" hidden>
+            <div class="board-head">
+              <span class="board-tag">DRAFT BOARD</span>
+              <span id="board-summary" class="board-summary"></span>
+              <button id="board-close" class="board-close" title="Ẩn board">✕</button>
+            </div>
+            <div id="board-graph" class="board-graph"></div>
+          </section>
+        </div>
       </section>
 
       <div class="avatar" id="avatar" title="Trợ lý — bấm để ghi (F7)">
         <canvas id="avatar-canvas"></canvas>
-      </div>
-
-      <div class="board-modal" id="board-modal" hidden>
-        <div class="board-head">
-          <span class="board-tag">DRAFT BOARD</span>
-          <span id="board-summary" class="board-summary"></span>
-          <button id="board-close" class="board-close" title="Đóng">✕</button>
-        </div>
-        <div id="board-graph" class="board-graph"></div>
       </div>
     </div>
   </body>

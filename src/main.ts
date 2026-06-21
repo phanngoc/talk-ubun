@@ -152,6 +152,7 @@ listen<Segment>("session:segment", (e) => {
   renderSegment(e.payload);
   keepBottom();
   refreshList();
+  autoRespond(); // reply by voice + refresh the board (if open), no button needed
 });
 
 listen<string>("state:changed", (e) => {
@@ -160,6 +161,7 @@ listen<string>("state:changed", (e) => {
   stateLabel.textContent = recording ? "Đang nghe…" : "Sẵn sàng";
   recBtn.textContent = recording ? "■ Dừng (F7)" : "● Ghi (F7)";
   avatar.setState(recording ? "listening" : "idle");
+  if (recording) stopSpeaking(); // don't talk over the user
 });
 
 listen<number>("audio:level", (e) => {
@@ -172,6 +174,11 @@ listen<string>("error", (e) => {
 
 // ---------- UI actions ----------
 recBtn.addEventListener("click", () => invoke("toggle_recording"));
+
+$<HTMLButtonElement>("#sidebar-toggle").addEventListener("click", () => {
+  const sb = $<HTMLElement>("#sidebar");
+  sb.hidden = !sb.hidden;
+});
 
 newBtn.addEventListener("click", async () => {
   const meta = await invoke<SessionMeta>("new_session");
@@ -190,49 +197,56 @@ titleEl.addEventListener("keydown", (e) => {
   }
 });
 
-// ---------- draft board ----------
+// ---------- draft board (side panel, auto-updates) ----------
 const draftBtn = $<HTMLButtonElement>("#draft-btn");
-const boardModal = $<HTMLDivElement>("#board-modal");
+const boardPanel = $<HTMLElement>("#board-panel");
 const boardSummary = $<HTMLSpanElement>("#board-summary");
 const boardGraph = $<HTMLDivElement>("#board-graph");
+let boardOpen = false;
+let boardBusy = false;
+let boardTimer = 0;
 
-function restoreAvatar() {
-  avatar.start();
-  avatar.setState(document.body.dataset.state === "listening" ? "listening" : "idle");
-}
-
-$<HTMLButtonElement>("#board-close").addEventListener("click", () => {
-  boardModal.hidden = true;
-  restoreAvatar();
-});
-window.addEventListener("resize", () => {
-  if (!boardModal.hidden) resizeBoard(boardGraph);
-});
-
-draftBtn.addEventListener("click", async () => {
-  draftBtn.disabled = true;
-  const prev = stateLabel.textContent;
-  stateLabel.textContent = "Đang vẽ sơ đồ ý tưởng…";
-  avatar.setState("thinking");
+async function updateBoard() {
+  if (boardBusy || !boardOpen) return;
+  boardBusy = true;
   try {
     const board = await invoke<DraftBoard>("generate_draft_board");
     boardSummary.textContent = board.summary || "";
-    boardModal.hidden = false;
-    avatar.pause(); // board covers the screen — free the GPU for the graph
-    // Defer to next frame so the modal has laid out (canvas gets a real size).
-    requestAnimationFrame(() => renderBoard(boardGraph, board));
-    stateLabel.textContent = prev || "Sẵn sàng";
+    renderBoard(boardGraph, board);
   } catch (err) {
-    stateLabel.textContent = "Draft board lỗi: " + err;
-    avatar.setState(document.body.dataset.state === "listening" ? "listening" : "idle");
+    boardSummary.textContent = "Board: " + err;
   } finally {
-    draftBtn.disabled = false;
+    boardBusy = false;
   }
+}
+function scheduleBoard() {
+  if (!boardOpen) return;
+  clearTimeout(boardTimer);
+  boardTimer = window.setTimeout(updateBoard, 1200);
+}
+function openBoard() {
+  boardPanel.hidden = false;
+  boardOpen = true;
+  requestAnimationFrame(() => {
+    resizeBoard(boardGraph);
+    updateBoard();
+  });
+}
+function closeBoard() {
+  boardPanel.hidden = true;
+  boardOpen = false;
+}
+draftBtn.addEventListener("click", () => (boardOpen ? closeBoard() : openBoard()));
+$<HTMLButtonElement>("#board-close").addEventListener("click", closeBoard);
+window.addEventListener("resize", () => {
+  if (boardOpen) resizeBoard(boardGraph);
 });
 
 // ---------- assistant reply (Claude + Soniox TTS) ----------
 const replyBtn = $<HTMLButtonElement>("#reply-btn");
 let audioCtx: AudioContext | null = null;
+let currentSrc: AudioBufferSourceNode | null = null;
+let replyBusy = false;
 
 function addReplyBlock(text: string) {
   hintEl.style.display = "none";
@@ -241,6 +255,17 @@ function addReplyBlock(text: string) {
   div.textContent = "🤖 " + text;
   segmentsEl.appendChild(div);
   keepBottom();
+}
+
+function stopSpeaking() {
+  if (currentSrc) {
+    try {
+      currentSrc.stop();
+    } catch {
+      /* already stopped */
+    }
+    currentSrc = null;
+  }
 }
 
 async function speakAudio(b64: string): Promise<void> {
@@ -258,6 +283,7 @@ async function speakAudio(b64: string): Promise<void> {
   src.connect(analyser);
   analyser.connect(audioCtx.destination);
   const data = new Uint8Array(analyser.frequencyBinCount);
+  currentSrc = src;
 
   avatar.setState("speaking");
   let raf = 0;
@@ -271,6 +297,7 @@ async function speakAudio(b64: string): Promise<void> {
   return new Promise((resolve) => {
     src.onended = () => {
       cancelAnimationFrame(raf);
+      if (currentSrc === src) currentSrc = null;
       avatar.setLevel(0);
       avatar.setState(document.body.dataset.state === "listening" ? "listening" : "idle");
       resolve();
@@ -280,23 +307,31 @@ async function speakAudio(b64: string): Promise<void> {
   });
 }
 
-replyBtn.addEventListener("click", async () => {
+async function doReply() {
+  if (replyBusy) return;
+  replyBusy = true;
   replyBtn.disabled = true;
-  const prev = stateLabel.textContent;
-  stateLabel.textContent = "Trợ lý đang nghĩ…";
   avatar.setState("thinking");
   try {
     const r = await invoke<{ text: string; audio_b64: string }>("speak_reply");
     addReplyBlock(r.text);
-    stateLabel.textContent = prev || "Sẵn sàng";
     await speakAudio(r.audio_b64);
   } catch (err) {
     stateLabel.textContent = "Trợ lý lỗi: " + err;
     avatar.setState(document.body.dataset.state === "listening" ? "listening" : "idle");
   } finally {
+    replyBusy = false;
     replyBtn.disabled = false;
   }
-});
+}
+replyBtn.addEventListener("click", doReply);
+
+// After you finish an utterance: the assistant replies, and (if the board panel
+// is open) the idea graph refreshes in parallel.
+function autoRespond() {
+  scheduleBoard();
+  doReply();
+}
 
 // ---------- boot ----------
 (async () => {

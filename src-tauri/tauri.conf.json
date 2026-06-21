@@ -15,10 +15,10 @@
       {
         "label": "main",
         "title": "talk-ubun",
-        "width": 960,
-        "height": 700,
-        "minWidth": 560,
-        "minHeight": 420
+        "width": 1240,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 480
       }
     ],
     "security": {
