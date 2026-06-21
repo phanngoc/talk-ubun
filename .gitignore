@@ -9,3 +9,6 @@ dist
 
 # Secrets
 .env
+
+# Local avatar model (not committed)
+public/*.vrm

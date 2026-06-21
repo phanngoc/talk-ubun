@@ -38,6 +38,7 @@ let currentId = "";
 // ---------- avatar ----------
 const avatar = new Avatar($<HTMLCanvasElement>("#avatar-canvas"));
 avatar.start();
+avatar.loadVRM("/avatar.vrm").then(() => avatar.resize()); // procedural fallback if missing
 $<HTMLDivElement>("#avatar").addEventListener("click", () => invoke("toggle_recording"));
 window.addEventListener("resize", () => avatar.resize());
 

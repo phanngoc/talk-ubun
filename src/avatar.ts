@@ -1,4 +1,11 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import {
+  VRMLoaderPlugin,
+  VRMUtils,
+  VRMExpressionPresetName,
+  type VRM,
+} from "@pixiv/three-vrm";
 
 export type AvatarState = "idle" | "listening" | "thinking" | "speaking";
 
@@ -6,9 +13,9 @@ const CYAN = new THREE.Color(0x3fe0cb);
 const VIOLET = new THREE.Color(0xa98bff);
 
 /**
- * A lightweight procedural "hologram" avatar: a rotating wireframe core inside a
- * particle shell with a glow, all reacting to the mic level. A stand-in for a
- * full VRM character (drop-in later) that keeps WebKitGTK happy.
+ * The on-screen assistant. Loads a VRM character if `/avatar.vrm` is present and
+ * drives amplitude-based lip-sync from the mic level; otherwise falls back to a
+ * lightweight procedural "hologram" (wireframe core + particle shell + glow).
  */
 export class Avatar {
   private renderer: THREE.WebGLRenderer;
@@ -27,6 +34,10 @@ export class Avatar {
   private color = CYAN.clone();
   private targetColor = CYAN.clone();
   private canvas: HTMLCanvasElement;
+  private running = false;
+
+  private vrm: VRM | null = null;
+  private blinkT = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -36,7 +47,13 @@ export class Avatar {
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
     this.camera.position.set(0, 0, 4);
 
-    // Wireframe core.
+    // Lights (for the VRM's MToon materials; the procedural lines ignore them).
+    this.scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+    const dir = new THREE.DirectionalLight(0xffffff, 2.0);
+    dir.position.set(1, 1.5, 1.2);
+    this.scene.add(dir);
+
+    // Procedural core.
     const wire = new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(1, 1));
     this.coreMat = new THREE.LineBasicMaterial({
       color: this.color.clone(),
@@ -46,7 +63,7 @@ export class Avatar {
     this.core = new THREE.LineSegments(wire, this.coreMat);
     this.scene.add(this.core);
 
-    // Particle shell (fibonacci sphere with jitter).
+    // Particle shell.
     const N = 900;
     const positions = new Float32Array(N * 3);
     const golden = Math.PI * (3 - Math.sqrt(5));
@@ -88,6 +105,39 @@ export class Avatar {
     this.resize();
   }
 
+  /** Try to load a VRM; on success, hide the procedural avatar and frame the head. */
+  async loadVRM(url: string) {
+    const loader = new GLTFLoader();
+    loader.register((parser) => new VRMLoaderPlugin(parser));
+    try {
+      const gltf = await loader.loadAsync(url);
+      const vrm = gltf.userData.vrm as VRM | undefined;
+      if (!vrm) throw new Error("no VRM in file");
+
+      VRMUtils.rotateVRM0(vrm); // face +Z (no-op for VRM1)
+      VRMUtils.combineSkeletons(gltf.scene);
+      vrm.scene.traverse((o) => (o.frustumCulled = false));
+      this.scene.add(vrm.scene);
+      this.vrm = vrm;
+
+      // Frame the head in the small canvas.
+      vrm.scene.updateMatrixWorld(true);
+      const head = vrm.humanoid?.getNormalizedBoneNode("head");
+      const hp = new THREE.Vector3(0, 1.35, 0);
+      head?.getWorldPosition(hp);
+      this.camera.position.set(hp.x, hp.y + 0.05, hp.z + 0.62);
+      this.camera.lookAt(hp.x, hp.y + 0.05, hp.z);
+      this.glow.position.set(hp.x, hp.y, hp.z - 0.2);
+      this.glow.scale.setScalar(1.1);
+
+      // Hide procedural visuals.
+      this.core.visible = false;
+      this.particles.visible = false;
+    } catch (e) {
+      console.warn("VRM load failed, using procedural avatar:", e);
+    }
+  }
+
   setLevel(v: number) {
     this.target = Math.min(1, Math.max(0, v));
   }
@@ -98,14 +148,12 @@ export class Avatar {
   }
 
   resize() {
-    const w = this.canvas.clientWidth || 150;
-    const h = this.canvas.clientHeight || 150;
+    const w = this.canvas.clientWidth || 152;
+    const h = this.canvas.clientHeight || 152;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
-
-  private running = false;
 
   start() {
     if (this.running) return;
@@ -128,22 +176,38 @@ export class Avatar {
 
     this.level += (this.target - this.level) * Math.min(1, dt * 12);
     this.color.lerp(this.targetColor, Math.min(1, dt * 4));
-    this.coreMat.color.copy(this.color);
-    this.partMat.color.copy(this.color);
     this.glowMat.color.copy(this.color);
 
-    const spin = this.state === "thinking" ? 1.4 : 0.35;
-    this.core.rotation.y += dt * spin;
-    this.core.rotation.x += dt * spin * 0.4;
-    this.particles.rotation.y -= dt * spin * 0.5;
-
-    const breathe = Math.sin(t * 1.6) * 0.03;
-    this.core.scale.setScalar(1 + breathe + this.level * 0.6);
-    this.particles.scale.setScalar(1 + this.level * 0.25);
-    this.partMat.size = 0.03 + this.level * 0.05;
-    this.coreMat.opacity = 0.55 + this.level * 0.45;
-    this.glow.scale.setScalar(2.6 + this.level * 2.2);
-    this.glowMat.opacity = 0.18 + this.level * 0.5;
+    if (this.vrm) {
+      const e = this.vrm.expressionManager;
+      if (e) {
+        e.setValue(VRMExpressionPresetName.Aa, Math.min(1, this.level * 1.7));
+        this.blinkT += dt;
+        e.setValue(VRMExpressionPresetName.Blink, this.blinkT % 4 < 0.12 ? 1 : 0);
+      }
+      const head = this.vrm.humanoid?.getNormalizedBoneNode("head");
+      if (head) {
+        head.rotation.y = Math.sin(t * 0.7) * 0.07;
+        head.rotation.x = Math.sin(t * 0.9) * 0.03 + this.level * 0.04;
+      }
+      this.vrm.update(dt);
+      this.glow.scale.setScalar(0.9 + this.level * 0.8);
+      this.glowMat.opacity = 0.12 + this.level * 0.4;
+    } else {
+      this.coreMat.color.copy(this.color);
+      this.partMat.color.copy(this.color);
+      const spin = this.state === "thinking" ? 1.4 : 0.35;
+      this.core.rotation.y += dt * spin;
+      this.core.rotation.x += dt * spin * 0.4;
+      this.particles.rotation.y -= dt * spin * 0.5;
+      const breathe = Math.sin(t * 1.6) * 0.03;
+      this.core.scale.setScalar(1 + breathe + this.level * 0.6);
+      this.particles.scale.setScalar(1 + this.level * 0.25);
+      this.partMat.size = 0.03 + this.level * 0.05;
+      this.coreMat.opacity = 0.55 + this.level * 0.45;
+      this.glow.scale.setScalar(2.6 + this.level * 2.2);
+      this.glowMat.opacity = 0.18 + this.level * 0.5;
+    }
 
     this.renderer.render(this.scene, this.camera);
   }
