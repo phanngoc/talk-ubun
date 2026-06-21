@@ -12,10 +12,17 @@ export interface DraftEdge {
   to: string;
   relation: string;
 }
+export interface DraftPlot {
+  label: string;
+  expr: string;
+  xmin: number;
+  xmax: number;
+}
 export interface DraftBoard {
   summary: string;
   nodes: DraftNode[];
   edges: DraftEdge[];
+  plots?: DraftPlot[];
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -34,6 +41,8 @@ let graph: any = null;
 const gnodes: any[] = [];
 const glinks: any[] = [];
 const nodeIds = new Set<string>();
+const gplots: DraftPlot[] = [];
+const plotExprs = new Set<string>();
 let summary = "";
 
 function ensureGraph(container: HTMLElement) {
@@ -76,6 +85,8 @@ export function resetBoard() {
   gnodes.length = 0;
   glinks.length = 0;
   nodeIds.clear();
+  gplots.length = 0;
+  plotExprs.clear();
   summary = "";
   if (graph) graph.graphData({ nodes: [], links: [] });
 }
@@ -92,6 +103,13 @@ export function applyDelta(container: HTMLElement, delta: DraftBoard) {
   for (const e of delta.edges ?? []) {
     if (e.from && e.to && nodeIds.has(e.from) && nodeIds.has(e.to)) {
       glinks.push({ source: e.from, target: e.to, relation: e.relation });
+    }
+  }
+  for (const p of delta.plots ?? []) {
+    const key = (p.expr || "").trim();
+    if (key && !plotExprs.has(key)) {
+      plotExprs.add(key);
+      gplots.push(p);
     }
   }
   if (delta.summary && delta.summary.trim()) summary = delta.summary;
@@ -124,4 +142,106 @@ export function resizeBoard(container: HTMLElement) {
     graph.width(container.clientWidth || window.innerWidth);
     graph.height(container.clientHeight || window.innerHeight - 60);
   }
+}
+
+export function plotCount() {
+  return gplots.length;
+}
+
+// Compile a Claude-provided JS math expression in terms of x (e.g. "Math.sin(x)").
+function compile(expr: string): ((x: number) => number) | null {
+  if (!/^[0-9a-zA-Z_.+\-*/(),\s^]*$/.test(expr)) return null; // reject anything but math
+  const js = expr.replace(/\^/g, "**");
+  try {
+    return new Function("x", `with (Math) { return (${js}); }`) as (x: number) => number;
+  } catch {
+    return null;
+  }
+}
+
+// Draw all accumulated function plots as 2D curves on a canvas (clear for math).
+export function drawPlots(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  const W = canvas.clientWidth || 360;
+  const H = canvas.clientHeight || 220;
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (!gplots.length) return;
+
+  let xmin = Infinity;
+  let xmax = -Infinity;
+  for (const p of gplots) {
+    xmin = Math.min(xmin, p.xmin);
+    xmax = Math.max(xmax, p.xmax);
+  }
+  if (!(xmax > xmin)) {
+    xmin = -6.283;
+    xmax = 6.283;
+  }
+
+  const N = 240;
+  let ymin = Infinity;
+  let ymax = -Infinity;
+  const series = gplots.map((p) => {
+    const f = compile(p.expr);
+    const pts: [number, number][] = [];
+    if (f) {
+      for (let i = 0; i <= N; i++) {
+        const x = xmin + ((xmax - xmin) * i) / N;
+        const y = f(x);
+        if (Number.isFinite(y)) {
+          pts.push([x, y]);
+          ymin = Math.min(ymin, y);
+          ymax = Math.max(ymax, y);
+        }
+      }
+    }
+    return { p, pts };
+  });
+  if (!(ymax > ymin)) {
+    ymin = -1;
+    ymax = 1;
+  }
+  const yr = ymax - ymin;
+  ymin -= yr * 0.08;
+  ymax += yr * 0.08;
+
+  const pad = 24;
+  const X = (x: number) => pad + ((x - xmin) / (xmax - xmin)) * (W - 2 * pad);
+  const Y = (y: number) => H - pad - ((y - ymin) / (ymax - ymin)) * (H - 2 * pad);
+
+  ctx.strokeStyle = "rgba(124,147,160,0.4)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (0 >= ymin && 0 <= ymax) {
+    ctx.moveTo(pad, Y(0));
+    ctx.lineTo(W - pad, Y(0));
+  }
+  if (0 >= xmin && 0 <= xmax) {
+    ctx.moveTo(X(0), pad);
+    ctx.lineTo(X(0), H - pad);
+  }
+  ctx.stroke();
+
+  const colors = ["#3fe0cb", "#a98bff", "#ffd166", "#5ad1ff", "#ff8fa3"];
+  series.forEach((s, idx) => {
+    const col = colors[idx % colors.length];
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    s.pts.forEach(([x, y], i) => {
+      const px = X(x);
+      const py = Y(y);
+      if (i) ctx.lineTo(px, py);
+      else ctx.moveTo(px, py);
+    });
+    ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.font = "12px ui-monospace, monospace";
+    ctx.fillText(s.p.label, pad + 6, pad + 12 + idx * 15);
+  });
 }

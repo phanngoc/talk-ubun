@@ -8,6 +8,8 @@ import {
   resetBoard,
   nodeCount,
   resizeBoard,
+  drawPlots,
+  plotCount,
   type DraftBoard,
 } from "./graph";
 
@@ -67,6 +69,12 @@ function autoGrow(ta: HTMLTextAreaElement) {
   ta.style.height = "auto";
   ta.style.height = ta.scrollHeight + "px";
 }
+function regrowAll() {
+  segmentsEl.querySelectorAll("textarea").forEach((ta) => autoGrow(ta as HTMLTextAreaElement));
+}
+// Re-fit every transcript box whenever the conversation column changes width
+// (board open/close, sidebar toggle, window resize) so text is never clipped.
+new ResizeObserver(() => regrowAll()).observe(transcriptEl);
 
 // debounce per segment id
 const saveTimers = new Map<string, number>();
@@ -228,6 +236,16 @@ const draftBtn = $<HTMLButtonElement>("#draft-btn");
 const boardPanel = $<HTMLElement>("#board-panel");
 const boardSummaryEl = $<HTMLSpanElement>("#board-summary");
 const boardGraph = $<HTMLDivElement>("#board-graph");
+const plotsCanvas = $<HTMLCanvasElement>("#board-plots");
+
+function refreshPlots() {
+  if (plotCount()) {
+    plotsCanvas.hidden = false;
+    drawPlots(plotsCanvas);
+  } else {
+    plotsCanvas.hidden = true;
+  }
+}
 let boardOpen = false;
 let boardBusy = false;
 let boardTimer = 0;
@@ -247,6 +265,7 @@ async function updateBoard() {
     });
     applyDelta(boardGraph, delta);
     boardSummaryEl.textContent = getSummary();
+    refreshPlots();
   } catch (err) {
     boardSummaryEl.textContent = "Board: " + err;
   } finally {
@@ -261,7 +280,10 @@ function scheduleBoard() {
 async function openBoard() {
   boardPanel.hidden = false;
   boardOpen = true;
-  requestAnimationFrame(() => resizeBoard(boardGraph));
+  requestAnimationFrame(() => {
+    resizeBoard(boardGraph);
+    refreshPlots();
+  });
   if (nodeCount() === 0) {
     // First open: seed the board from the existing conversation (user turns).
     const s = await invoke<Session>("current_session");
@@ -280,7 +302,10 @@ function closeBoard() {
 draftBtn.addEventListener("click", () => (boardOpen ? closeBoard() : openBoard()));
 $<HTMLButtonElement>("#board-close").addEventListener("click", closeBoard);
 window.addEventListener("resize", () => {
-  if (boardOpen) resizeBoard(boardGraph);
+  if (boardOpen) {
+    resizeBoard(boardGraph);
+    refreshPlots();
+  }
 });
 
 // ---------- assistant reply (Claude + Soniox TTS) ----------

@@ -28,10 +28,21 @@ pub struct Edge {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct Plot {
+    pub label: String,
+    /// JavaScript expression in terms of `x`, using Math.* (e.g. "Math.sin(x)").
+    pub expr: String,
+    pub xmin: f64,
+    pub xmax: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DraftBoard {
     pub summary: String,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    #[serde(default)]
+    pub plots: Vec<Plot>,
 }
 
 const SYSTEM: &str = "Bạn cập nhật một sơ đồ ý tưởng theo kiểu BỔ SUNG (incremental). \
@@ -42,6 +53,11 @@ Node mới: id chưa trùng (vd n7, n8...), label ngắn gọn, \
 kind ∈ [idea, feature, task, entity, question, decision], note 1 câu. \
 Edge mới có thể nối tới id node ĐÃ CÓ trong board, hoặc giữa các node mới. \
 Nếu phần mới không có ý nào đáng thêm, trả nodes=[] và edges=[]. \
+QUAN TRỌNG — ĐỒ THỊ: nếu người dùng nhắc tới một HÀM SỐ hoặc đồ thị toán học \
+(sin, cos, parabol y=x^2, đạo hàm, e mũ, đường thẳng...), hãy THÊM vào 'plots' một mục: \
+label (vd 'y = sin(x)'), expr (biểu thức JavaScript theo biến x dùng Math, vd 'Math.sin(x)', \
+'x*x', 'Math.exp(-x*x)', 'Math.cos(x)'), xmin và xmax (khoảng vẽ hợp lý, vd -6.28 đến 6.28). \
+KHÔNG lặp lại plot đã có trong board hiện tại. Nếu không liên quan hàm số, plots=[]. \
 summary: tóm tắt lại TOÀN BỘ board (1–2 câu). Trả về JSON đúng schema.";
 
 fn schema() -> Value {
@@ -76,9 +92,23 @@ fn schema() -> Value {
                     },
                     "required": ["from", "to", "relation"]
                 }
+            },
+            "plots": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "label": { "type": "string" },
+                        "expr": { "type": "string" },
+                        "xmin": { "type": "number" },
+                        "xmax": { "type": "number" }
+                    },
+                    "required": ["label", "expr", "xmin", "xmax"]
+                }
             }
         },
-        "required": ["summary", "nodes", "edges"]
+        "required": ["summary", "nodes", "edges", "plots"]
     })
 }
 

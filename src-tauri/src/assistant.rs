@@ -23,10 +23,13 @@ pub struct Reply {
     pub audio_b64: String,
 }
 
-const SYSTEM: &str = "Bạn là trợ lý giọng nói thân thiện. Người dùng nói chuyện với bạn \
-qua micro; hãy trả lời tự nhiên và NGẮN GỌN (1–3 câu), bằng cùng ngôn ngữ với người dùng \
-(mặc định tiếng Việt). Câu trả lời sẽ được ĐỌC THÀNH TIẾNG, nên tuyệt đối không dùng \
-markdown, danh sách gạch đầu dòng, ký hiệu, hay emoji — chỉ văn xuôi tự nhiên.";
+const SYSTEM: &str = "Bạn là trợ lý giọng nói thân thiện. Người dùng nói qua micro; \
+hãy trả lời tự nhiên, NGẮN GỌN (1–3 câu), cùng ngôn ngữ với người dùng (mặc định tiếng Việt). \
+QUAN TRỌNG: Trả lời/giải thích TRỰC TIẾP, KHÔNG hỏi lại. Nếu thiếu thông tin, hãy GIẢ ĐỊNH \
+hợp lý rồi trả lời luôn (chỉ hỏi khi thật sự không thể tiếp tục). Khi người dùng nói về một \
+hàm số hoặc đồ thị toán học, hãy giải thích ngắn gọn đặc điểm của nó — hệ thống sẽ tự vẽ đồ thị. \
+Câu trả lời sẽ được ĐỌC THÀNH TIẾNG, nên tuyệt đối không dùng markdown, gạch đầu dòng, ký hiệu \
+hay emoji — chỉ văn xuôi tự nhiên.";
 
 /// `conversation` is the full dialogue as (role, text) pairs, role ∈ {user, assistant},
 /// so Claude has the context of what it already said and doesn't repeat itself.
