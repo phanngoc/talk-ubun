@@ -6,10 +6,8 @@ import {
   boardSnapshot,
   getSummary,
   resetBoard,
-  nodeCount,
+  boardEmpty,
   resizeBoard,
-  drawPlots,
-  plotCount,
   type DraftBoard,
 } from "./graph";
 
@@ -236,16 +234,6 @@ const draftBtn = $<HTMLButtonElement>("#draft-btn");
 const boardPanel = $<HTMLElement>("#board-panel");
 const boardSummaryEl = $<HTMLSpanElement>("#board-summary");
 const boardGraph = $<HTMLDivElement>("#board-graph");
-const plotsCanvas = $<HTMLCanvasElement>("#board-plots");
-
-function refreshPlots() {
-  if (plotCount()) {
-    plotsCanvas.hidden = false;
-    drawPlots(plotsCanvas);
-  } else {
-    plotsCanvas.hidden = true;
-  }
-}
 let boardOpen = false;
 let boardBusy = false;
 let boardTimer = 0;
@@ -265,7 +253,6 @@ async function updateBoard() {
     });
     applyDelta(boardGraph, delta);
     boardSummaryEl.textContent = getSummary();
-    refreshPlots();
   } catch (err) {
     boardSummaryEl.textContent = "Board: " + err;
   } finally {
@@ -280,11 +267,8 @@ function scheduleBoard() {
 async function openBoard() {
   boardPanel.hidden = false;
   boardOpen = true;
-  requestAnimationFrame(() => {
-    resizeBoard(boardGraph);
-    refreshPlots();
-  });
-  if (nodeCount() === 0) {
+  requestAnimationFrame(() => resizeBoard(boardGraph));
+  if (boardEmpty()) {
     // First open: seed the board from the existing conversation (user turns).
     const s = await invoke<Session>("current_session");
     const seed = s.segments
@@ -302,10 +286,7 @@ function closeBoard() {
 draftBtn.addEventListener("click", () => (boardOpen ? closeBoard() : openBoard()));
 $<HTMLButtonElement>("#board-close").addEventListener("click", closeBoard);
 window.addEventListener("resize", () => {
-  if (boardOpen) {
-    resizeBoard(boardGraph);
-    refreshPlots();
-  }
+  if (boardOpen) resizeBoard(boardGraph);
 });
 
 // ---------- assistant reply (Claude + Soniox TTS) ----------

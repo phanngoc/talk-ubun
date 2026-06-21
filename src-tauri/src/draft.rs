@@ -1,9 +1,8 @@
-//! Draft board (incremental): extend an idea graph with newly-spoken content.
+//! Draft board (incremental math charts): extend the set of function plots.
 //!
-//! Instead of re-deriving the whole board each time, we send the current board
-//! (compact) plus only the new utterance and ask Claude for the DELTA — the new
-//! nodes/edges to add. Saves tokens and latency, and keeps the layout stable.
-//! Thinking off + low effort: this is a mechanical extraction, not deep reasoning.
+//! The board is a math visualization. We send the current plots (compact) plus
+//! the new utterance and Claude returns only NEW plots to add — 2D curves
+//! (y=f(x)) or 3D surfaces (z=f(x,y)). Thinking off + low effort: mechanical.
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -13,25 +12,11 @@ const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const MODEL: &str = "claude-opus-4-8";
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Node {
-    pub id: String,
-    pub label: String,
-    pub kind: String,
-    pub note: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Edge {
-    pub from: String,
-    pub to: String,
-    pub relation: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 pub struct Plot {
     pub label: String,
-    /// JavaScript expression in terms of `x`, using Math.* (e.g. "Math.sin(x)").
+    /// JavaScript expression. dim=2 → in terms of x; dim=3 → in terms of x and y.
     pub expr: String,
+    pub dim: u8,
     pub xmin: f64,
     pub xmax: f64,
 }
@@ -39,26 +24,21 @@ pub struct Plot {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DraftBoard {
     pub summary: String,
-    pub nodes: Vec<Node>,
-    pub edges: Vec<Edge>,
     #[serde(default)]
     pub plots: Vec<Plot>,
 }
 
-const SYSTEM: &str = "Bạn cập nhật một sơ đồ ý tưởng theo kiểu BỔ SUNG (incremental). \
-Bạn nhận: (1) board hiện tại dạng JSON (có thể rỗng) gồm các node và edge đã có; \
-(2) phần nội dung người dùng VỪA nói thêm. Hãy trả về CHỈ những node MỚI và edge MỚI \
-cần thêm vào — TUYỆT ĐỐI KHÔNG lặp lại node đã có trong board hiện tại. \
-Node mới: id chưa trùng (vd n7, n8...), label ngắn gọn, \
-kind ∈ [idea, feature, task, entity, question, decision], note 1 câu. \
-Edge mới có thể nối tới id node ĐÃ CÓ trong board, hoặc giữa các node mới. \
-Nếu phần mới không có ý nào đáng thêm, trả nodes=[] và edges=[]. \
-QUAN TRỌNG — ĐỒ THỊ: nếu người dùng nhắc tới một HÀM SỐ hoặc đồ thị toán học \
-(sin, cos, parabol y=x^2, đạo hàm, e mũ, đường thẳng...), hãy THÊM vào 'plots' một mục: \
-label (vd 'y = sin(x)'), expr (biểu thức JavaScript theo biến x dùng Math, vd 'Math.sin(x)', \
-'x*x', 'Math.exp(-x*x)', 'Math.cos(x)'), xmin và xmax (khoảng vẽ hợp lý, vd -6.28 đến 6.28). \
-KHÔNG lặp lại plot đã có trong board hiện tại. Nếu không liên quan hàm số, plots=[]. \
-summary: tóm tắt lại TOÀN BỘ board (1–2 câu). Trả về JSON đúng schema.";
+const SYSTEM: &str = "Bạn dựng bảng VẼ ĐỒ THỊ TOÁN HỌC theo kiểu BỔ SUNG. Nhận: (1) board hiện \
+tại (JSON) gồm các đồ thị đã có; (2) nội dung người dùng vừa nói. Trả về CHỈ đồ thị MỚI cần thêm \
+vào 'plots' — TUYỆT ĐỐI KHÔNG lặp lại đồ thị (expr) đã có. Mỗi plot gồm: \
+label (tên ngắn, vd 'y = x²' hoặc 'paraboloid z = x²+y²'); \
+dim (= 2 nếu là hàm một biến y=f(x); = 3 nếu là MẶT CONG z=f(x,y), ví dụ paraboloid khi quay \
+parabol quanh trục, mặt sóng, mặt yên ngựa...); \
+expr (biểu thức JavaScript: dim=2 dùng biến x — vd 'Math.sin(x)','x*x','Math.exp(-x*x)'; \
+dim=3 dùng x VÀ y — vd 'x*x + y*y','Math.sin(Math.sqrt(x*x+y*y))'); \
+xmin, xmax (khoảng vẽ hợp lý, dùng chung cho cả x và y khi dim=3). \
+Khi người dùng nói 'dạng 3D', 'mặt cong', 'không gian 3 chiều' → dùng dim=3. \
+summary: tóm tắt 1-2 câu về board. Nếu không liên quan đồ thị, plots=[]. Trả JSON đúng schema.";
 
 fn schema() -> Value {
     json!({
@@ -66,33 +46,6 @@ fn schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "summary": { "type": "string" },
-            "nodes": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "id": { "type": "string" },
-                        "label": { "type": "string" },
-                        "kind": { "type": "string" },
-                        "note": { "type": "string" }
-                    },
-                    "required": ["id", "label", "kind", "note"]
-                }
-            },
-            "edges": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "from": { "type": "string" },
-                        "to": { "type": "string" },
-                        "relation": { "type": "string" }
-                    },
-                    "required": ["from", "to", "relation"]
-                }
-            },
             "plots": {
                 "type": "array",
                 "items": {
@@ -101,14 +54,15 @@ fn schema() -> Value {
                     "properties": {
                         "label": { "type": "string" },
                         "expr": { "type": "string" },
+                        "dim": { "type": "integer" },
                         "xmin": { "type": "number" },
                         "xmax": { "type": "number" }
                     },
-                    "required": ["label", "expr", "xmin", "xmax"]
+                    "required": ["label", "expr", "dim", "xmin", "xmax"]
                 }
             }
         },
-        "required": ["summary", "nodes", "edges", "plots"]
+        "required": ["summary", "plots"]
     })
 }
 
@@ -156,10 +110,7 @@ pub async fn extend(api_key: &str, current_board_json: &str, new_text: &str) -> 
     }
     let text = text.trim();
     if text.is_empty() {
-        return Err(anyhow!(
-            "Claude returned no board (stop_reason: {:?})",
-            val.get("stop_reason")
-        ));
+        return Err(anyhow!("Claude returned no board"));
     }
 
     serde_json::from_str::<DraftBoard>(text).map_err(|e| anyhow!("parsing board JSON failed: {e}"))
